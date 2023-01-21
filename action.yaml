@@ -1,0 +1,19 @@
+name: "k8s node"
+description: "白嫖是唯一生产力"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Unlock
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        rm -rf wireguard.configs
+        git clone git@github.com:justforlxz/wireguard.configs -b lock
+        cd wireguard.configs
+        if [[ -f lock ]];
+        then
+          git reset HEAD^
+          rm -rf lock
+          git push -f
+        fi
