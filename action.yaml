@@ -1,0 +1,28 @@
+name: "k8s node"
+description: "白嫖是唯一生产力"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Lock Database
+      if: ${{ always() }}
+      shell: bash
+      id: lock
+      run: |
+        for (( ; ; ))
+        do
+          rm -rf wireguard.configs || true
+          git clone git@github.com:justforlxz/wireguard.configs -b lock
+          cd wireguard.configs
+          if [[ -f "lock" ]];
+          then
+            sleep $[ ( $RANDOM % 60 )  + 1 ]s
+            continue
+          else
+            touch lock
+            git add lock
+            git commit -m "lock"
+            git push || continue
+            break
+          fi
+        done
