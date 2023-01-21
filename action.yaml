@@ -1,0 +1,62 @@
+name: "k8s node"
+description: "白嫖是唯一生产力"
+
+inputs:
+  workId:
+    description: "vpn workId"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Get VPN Info
+      id: meta
+      uses: actions/github-script@v6
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        workId: ${{ github.event.client_payload.workId }}
+      with:
+        result-encoding: string
+        script: |
+          const fs = require('fs')
+          const { workId } = process.env;
+          const { Octokit } = require("@octokit/action");
+          const octokit = new Octokit();
+          const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
+          const usings = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}{?ref}', {
+            owner,
+            repo,
+            path: 'using'
+          });
+          for (const using of usings.data) {
+            if (!using.name.endsWith('node')) {
+              continue;
+            }
+            const result = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}{?ref}', {
+              owner,
+              repo,
+              path: using.path
+            });
+            console.log(result);
+            console.log(using.path);
+            const content = result.content.replace('\n', '');
+            if (btoa(content) === workId) {
+              const result = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}{?ref}', {
+                owner,
+                repo,
+                path: `nodes/${using.name}`
+              });
+              fs.writeFileSync(using.name, atob(result.content));
+              return result.name;
+            }
+          }
+    - name: Init VPN
+      shell: bash
+      env:
+        vpn: ${{ steps.meta.outpts.result }}
+      run: |
+        sudo cp $vpn /etc/wireguard/$vpn.conf
+        sudo wg-quick up $vpn || true
+        sudo wg
+        ip -c a
+        ip route
+        ping -c 5 10.2.0.1 || true
