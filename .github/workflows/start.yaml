@@ -1,0 +1,135 @@
+name: Start k8s worker
+on:
+  repository_dispatch:
+    types:
+      - worker/start/*
+      - worker/stop/*
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v1
+        with:
+          version: 18
+      - run: npm install @octokit/action
+      - name: Registe vpn
+        id: vpn
+        if: ${{ github.event.client_payload.registe }}
+        uses: actions/github-script@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+        with:
+          result-encoding: string
+          script: |
+            const fs = require('fs');
+            const { Octokit } = require("@octokit/action");
+            const octokit = new Octokit();
+            const [owner] = process.env.GITHUB_REPOSITORY.split("/");
+            const repo = 'wireguard.configs';
+            const vpns = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}{?ref}', {
+              owner,
+              repo,
+              path: 'nodes'
+            });
+            const usings = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}{?ref}', {
+              owner,
+              repo,
+              path: 'using'
+            });
+            const result = vpns.data.filter(item => {
+              if (!item.name.endsWith('node')) {
+                  return false;
+              }
+              for (const file of usings.data) {
+                if (file.name === item.name) {
+                  return false;
+                }
+              }
+              return true;
+            });
+            if (result.length < 1) {
+              return;
+            }
+            const node = result[0];
+            await octokit.request('PUT /repos/{owner}/{repo}/contents/{path}', {
+              owner,
+              repo,
+              path: `using/${node.name}`,
+              message: `using ${node.name}`,
+              committer: {
+                name: 'justforlxz',
+                email: 'justforlxz@gmail.com'
+              },
+              content: ``
+            })
+            const value = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}{?ref}', {
+              owner,
+              repo,
+              path: node.path
+            });
+            fs.writeFileSync(value.data.name, value.data.content);
+            return value.data.name;
+      - name: Start worker
+        continue-on-error: true
+        uses: actions/github-script@v6
+        if: ${{ github.event.client_payload.registe }}
+        env:
+          vpn: ${{ steps.vpn.outputs.result }}
+          master_token: ${{ secrets.TOKEN }}
+          GITHUB_TOKEN: ${{ github.event.client_payload.worker.token }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { vpn, owner, repo, master_token } = process.env;
+            const { Octokit } = require("@octokit/action");
+            const octokit = new Octokit();
+
+            if (vpn.length === '') {
+              return;
+            }
+
+            await octokit.request('POST /repos/{owner}/{repo}/dispatches', {
+              owner: context.payload.client_payload.worker.owner,
+              repo: context.payload.client_payload.worker.repo,
+              event_type: `node/${vpn}`,
+              client_payload: {
+                vpn_node: vpn,
+                vpn: fs.readFileSync(vpn).toString().replace(/[\r\n]+/gm, ''),
+                k3s_node_token: context.payload.client_payload.k3s_node_token,
+                kube_data_config: context.payload.client_payload.kube_data_config,
+                work_time: context.payload.client_payload.worker.work_time,
+                master: {
+                  token: master_token
+                },
+                zerotier: context.payload.client_payload.zerotier,
+              }
+            })
+      - name: Unregiste vpn
+        if: ${{ github.event.client_payload.unregiste }}
+        uses: actions/github-script@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          vpn: ${{ github.event.client_payload.vpn }}
+        with:
+          script: |
+            const { vpn } = process.env;
+            const { Octokit } = require("@octokit/action");
+            const octokit = new Octokit();
+            const [owner] = process.env.GITHUB_REPOSITORY.split("/");
+            const repo = 'wireguard.configs';
+            const result = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}{?ref}', {
+              owner,
+              repo,
+              path: `using/${vpn}`
+            });
+              return await octokit.request('DELETE /repos/{owner}/{repo}/contents/{path}', {
+                owner,
+                repo,
+                path: `using/${vpn}`,
+                message: 'unregiste vpn',
+                committer: {
+                  name: 'justforlxz',
+                  email: 'justforlxz@gmail.com'
+                },
+                sha: result.data.sha
+              })
